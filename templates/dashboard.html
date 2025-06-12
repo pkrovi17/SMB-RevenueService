@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-
 {% block title %}Dashboard - Financial Analysis{% endblock %}
 
 {% block content %}
@@ -31,36 +30,35 @@
 </div>
 {% endif %}
 
-<script id="dashboard-data" type="application/json">
+<script type="application/json" id="dashboard-data">
 {
-  "charts": {{ charts|tojson|safe }},
-  "forecastChart": {% if forecast_chart %}{{ forecast_chart|tojson|safe }}{% else %}null{% endif %}
+  "charts": {{ charts | tojson | safe }},
+  "forecastChart": {{ forecast_chart | tojson | safe if forecast_chart else 'null' }}
 }
 </script>
 
 <script>
-document.addEventListener('DOMContentLoaded', function () {
-    const data = JSON.parse(document.getElementById("dashboard-data").textContent);
+document.addEventListener("DOMContentLoaded", function () {
+    const parsed = JSON.parse(document.getElementById("dashboard-data").textContent);
 
-    data.charts.forEach((chartData, index) => {
-        Plotly.newPlot('chart-' + index, chartData.data, chartData.layout, {
-            responsive: true,
-            displayModeBar: false
-        });
+    // Render each chart
+    parsed.charts.forEach((item, index) => {
+        const div = document.getElementById("chart-" + index);
+        if (div && item.chart) {
+            const fig = JSON.parse(item.chart);
+            Plotly.newPlot(div, fig.data, fig.layout || {}, { responsive: true });
+        }
     });
 
-    if (data.forecastChart) {
-        Plotly.newPlot('forecast-chart', data.forecastChart.data, data.forecastChart.layout, {
-            responsive: true,
-            displayModeBar: false
-        });
+    // Forecast chart
+    if (parsed.forecastChart) {
+        const fig = JSON.parse(parsed.forecastChart);
+        Plotly.newPlot("forecast-chart", fig.data, fig.layout || {}, { responsive: true });
     }
 
-    // ✅ Explicitly hide the loader on page load
+    // Hide loading screen
     const loader = document.getElementById("loading-screen");
-    if (loader) {
-        loader.style.display = "none";
-    }
+    if (loader) loader.style.display = "none";
 });
 </script>
 {% endblock %}

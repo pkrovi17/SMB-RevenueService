@@ -35,6 +35,17 @@
         <button type="submit" class="btn">🚀 Generate Dashboard</button>
     </form>
 </div>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const form = document.querySelector('form');
+    form.addEventListener('submit', () => {
+        const loader = document.getElementById("loading-screen");
+        if (loader) {
+            loader.style.display = "flex";
+        }
+    });
+});
+</script>
 
 <div style="background: rgba(45, 45, 45, 0.3); border-radius: 12px; padding: 20px; margin-top: 30px;">
     <h3 style="color: #f5c147; margin-bottom: 15px;">🎯 How It Works</h3>

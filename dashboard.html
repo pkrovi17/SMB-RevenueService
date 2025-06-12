@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Financial Analysis{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 30px;">
+    <a href="/" class="btn">← Back to Upload</a>
+</div>
+
+<div id="charts-container">
+    {% for chart in charts %}
+    <div class="chart-container">
+        <h3 class="chart-title">{{ chart.config.title }}</h3>
+        <p class="chart-description">{{ chart.config.description }}</p>
+        <div id="chart-{{ loop.index0 }}" style="height: 400px;"></div>
+        <div class="chart-insight">
+            💡 <strong>Insight:</strong> {{ chart.config.insight }}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% if forecast_chart %}
+<div class="chart-container">
+    <h3 class="chart-title">📈 Revenue Forecast</h3>
+    <p class="chart-description">AI-powered forecast using Prophet time series analysis</p>
+    <div id="forecast-chart" style="height: 400px;"></div>
+    <div class="chart-insight">
+        💡 <strong>Forecast Insight:</strong> This projection shows expected revenue trends based on historical data. Use this to plan inventory, staffing, and cash flow.
+    </div>
+</div>
+{% endif %}
+
+<!-- Safely embed JSON data -->
+<script id="dashboard-data" type="application/json">
+{
+  "charts": {{ charts|tojson|safe }},
+  "forecastChart": {% if forecast_chart %}{{ forecast_chart|tojson|safe }}{% else %}null{% endif %}
+}
+</script>
+
+<!-- Chart rendering script -->
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const data = JSON.parse(document.getElementById("dashboard-data").textContent);
+
+    data.charts.forEach((chartData, index) => {
+        Plotly.newPlot('chart-' + index, chartData.data, chartData.layout, {
+            responsive: true,
+            displayModeBar: false
+        });
+    });
+
+    if (data.forecastChart) {
+        Plotly.newPlot('forecast-chart', data.forecastChart.data, data.forecastChart.layout, {
+            responsive: true,
+            displayModeBar: false
+        });
+    }
+});
+</script>
+{% endblock %}

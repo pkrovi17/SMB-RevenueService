@@ -1,36 +1,36 @@
 {% extends "base.html" %}
-{% block title %}Dashboard - Financial Analysis{% endblock %}
+{% block title %}Dashboard{% endblock %}
 
 {% block content %}
 <div style="margin-bottom: 30px;">
-    <a href="/" class="btn">← Back to Upload</a>
+  <a href="/" class="btn">← Back to Upload</a>
 </div>
 
 <div id="charts-container">
-    {% for chart in charts %}
-    <div class="chart-container">
-        <h3 class="chart-title">{{ chart.config.title }}</h3>
-        <p class="chart-description">{{ chart.config.description }}</p>
-        <div id="chart-{{ loop.index0 }}" style="height: 400px;"></div>
-        <div class="chart-insight">
-            💡 <strong>Insight:</strong> {{ chart.config.insight }}
-        </div>
+  {% for chart in charts %}
+  <div class="chart-container">
+    <h3 class="chart-title">{{ chart.config.title }}</h3>
+    <p class="chart-description">{{ chart.config.description }}</p>
+    <div id="chart-{{ loop.index0 }}" style="height: 400px;"></div>
+    <div class="chart-insight">
+      💡 <strong>Insight:</strong> {{ chart.config.insight }}
     </div>
-    {% endfor %}
+  </div>
+  {% endfor %}
 </div>
 
 {% if forecast_chart %}
 <div class="chart-container">
-    <h3 class="chart-title">📈 Revenue Forecast</h3>
-    <p class="chart-description">AI-powered forecast using Prophet time series analysis</p>
-    <div id="forecast-chart" style="height: 400px;"></div>
-    <div class="chart-insight">
-        💡 <strong>Forecast Insight:</strong> This projection shows expected revenue trends based on historical data. Use this to plan inventory, staffing, and cash flow.
-    </div>
+  <h3 class="chart-title">📈 Revenue Forecast</h3>
+  <p class="chart-description">AI-powered forecast using Prophet time series analysis</p>
+  <div id="forecast-chart" style="height: 400px;"></div>
+  <div class="chart-insight">
+    💡 <strong>Forecast Insight:</strong> This projection shows expected revenue trends based on historical data.
+  </div>
 </div>
 {% endif %}
 
-<script type="application/json" id="dashboard-data">
+<script type="application/json" id="chart-data">
 {
   "charts": {{ charts | tojson | safe }},
   "forecastChart": {{ forecast_chart | tojson | safe if forecast_chart else 'null' }}
@@ -39,26 +39,23 @@
 
 <script>
 document.addEventListener("DOMContentLoaded", function () {
-    const parsed = JSON.parse(document.getElementById("dashboard-data").textContent);
+  const data = JSON.parse(document.getElementById("chart-data").textContent);
 
-    // Render each chart
-    parsed.charts.forEach((item, index) => {
-        const div = document.getElementById("chart-" + index);
-        if (div && item.chart) {
-            const fig = JSON.parse(item.chart);
-            Plotly.newPlot(div, fig.data, fig.layout || {}, { responsive: true });
-        }
-    });
+  // Render all normal charts
+  data.charts.forEach((entry, index) => {
+    const fig = JSON.parse(entry.chart);
+    Plotly.newPlot("chart-" + index, fig.data, fig.layout || {}, {responsive: true});
+  });
 
-    // Forecast chart
-    if (parsed.forecastChart) {
-        const fig = JSON.parse(parsed.forecastChart);
-        Plotly.newPlot("forecast-chart", fig.data, fig.layout || {}, { responsive: true });
-    }
+  // Render forecast chart if exists
+  if (data.forecastChart) {
+    const forecastFig = JSON.parse(data.forecastChart);
+    Plotly.newPlot("forecast-chart", forecastFig.data, forecastFig.layout || {}, {responsive: true});
+  }
 
-    // Hide loading screen
-    const loader = document.getElementById("loading-screen");
-    if (loader) loader.style.display = "none";
+  // Hide loader
+  const loader = document.getElementById("loading-screen");
+  if (loader) loader.style.display = "none";
 });
 </script>
 {% endblock %}

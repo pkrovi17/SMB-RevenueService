@@ -16,25 +16,36 @@
                 </div>
             </div>
         </div>
-        
+
         <div class="form-group">
             <label for="file">📂 Upload Excel/CSV File:</label>
             <input type="file" name="file" id="file" class="form-control" accept=".xlsx,.xls,.csv">
         </div>
-        
+
         <div class="or-divider">
             <span>OR</span>
         </div>
-        
+
         <div class="form-group">
             <label for="google_url">🌐 Google Sheets URL:</label>
             <input type="url" name="google_url" id="google_url" class="form-control" 
                    placeholder="https://docs.google.com/spreadsheets/d/...">
         </div>
-        
+
         <button type="submit" class="btn">🚀 Generate Dashboard</button>
     </form>
 </div>
+
+<div style="background: rgba(45, 45, 45, 0.3); border-radius: 12px; padding: 20px; margin-top: 30px;">
+    <h3 style="color: #f5c147; margin-bottom: 15px;">🎯 How It Works</h3>
+    <ol style="color: #cccccc; line-height: 1.8;">
+        <li>Upload your financial spreadsheet or paste a Google Sheets link</li>
+        <li>Our AI (LLaMA 3) extracts key financial metrics</li>
+        <li>Generate interactive dashboards with insights</li>
+        <li>Get Prophet-powered forecasts for future planning</li>
+    </ol>
+</div>
+
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     const form = document.querySelector('form');
@@ -46,14 +57,4 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 });
 </script>
-
-<div style="background: rgba(45, 45, 45, 0.3); border-radius: 12px; padding: 20px; margin-top: 30px;">
-    <h3 style="color: #f5c147; margin-bottom: 15px;">🎯 How It Works</h3>
-    <ol style="color: #cccccc; line-height: 1.8;">
-        <li>Upload your financial spreadsheet or paste a Google Sheets link</li>
-        <li>Our AI (LLaMA 3) extracts key financial metrics</li>
-        <li>Generate interactive dashboards with insights</li>
-        <li>Get Prophet-powered forecasts for future planning</li>
-    </ol>
-</div>
 {% endblock %}

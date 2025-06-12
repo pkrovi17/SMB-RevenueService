@@ -31,7 +31,6 @@
 </div>
 {% endif %}
 
-<!-- Safely embed JSON data -->
 <script id="dashboard-data" type="application/json">
 {
   "charts": {{ charts|tojson|safe }},
@@ -56,9 +55,6 @@ document.addEventListener('DOMContentLoaded', function () {
             displayModeBar: false
         });
     }
-
-    
 });
 </script>
-
 {% endblock %}

@@ -55,6 +55,12 @@ document.addEventListener('DOMContentLoaded', function () {
             displayModeBar: false
         });
     }
+
+    // ✅ Explicitly hide the loader on page load
+    const loader = document.getElementById("loading-screen");
+    if (loader) {
+        loader.style.display = "none";
+    }
 });
 </script>
 {% endblock %}

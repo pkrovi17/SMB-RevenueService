@@ -8,12 +8,17 @@ import plotly.utils
 from prophet import Prophet
 import numpy as np
 from werkzeug.utils import secure_filename
-import tempfile
 import uuid
 from datetime import datetime
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-app.secret_key = 'your-secret-key-change-this'
+# Use environment variable for secret key
+app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
@@ -22,6 +27,7 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # Store session data in memory (for demo - use Redis/DB in production)
 session_data = {}
+
 def run_llama_dashboard_with_retry(data_str, max_attempts=5):
     prompt = get_dashboard_prompt(data_str)
     last_error = ""
@@ -80,11 +86,11 @@ def get_nested_value(data, path):
         if clean.startswith("(") and clean.endswith(")"):
             try:
                 return -float(clean[1:-1])
-            except:
+            except ValueError:
                 return None
         try:
             return float(clean)
-        except:
+        except ValueError:
             return None
     else:
         return None
@@ -115,7 +121,7 @@ def read_data(file_path_or_url):
         else:
             raise ValueError("Unsupported file type or URL format.")
     except Exception as e:
-        print(f"Error reading file: {e}")
+        logger.error(f"Error reading file: {e}")
     return data
 
 def format_for_prompt(data_dict):
@@ -126,25 +132,45 @@ def format_for_prompt(data_dict):
     return formatted
 
 def run_ollama_prompt(prompt, model='llama3'):
+    # Validate model parameter to prevent command injection
+    allowed_models = ['llama3', 'llama2', 'mistral', 'codellama']
+    if model not in allowed_models:
+        logger.error(f"Invalid model: {model}")
+        return f"Error: Invalid model '{model}'"
+    
     try:
         result = subprocess.run(
             ['ollama', 'run', model],
             input=prompt.encode('utf-8'),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            timeout=90
+            timeout=90,
+            check=True
         )
         return result.stdout.decode('utf-8')
+    except subprocess.TimeoutExpired:
+        logger.error("Ollama request timed out")
+        return "Error: Request timed out"
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Ollama process failed: {e}")
+        return f"Error running ollama: {e}"
     except Exception as e:
+        logger.error(f"Unexpected error running ollama: {e}")
         return f"Error running ollama: {e}"
 
 def extract_json_from_response(response):
     try:
         start = response.find('{')
         end = response.rfind('}') + 1
+        if start == -1 or end == 0:
+            logger.warning("No JSON found in response")
+            return {"raw_response": response}
         return json.loads(response[start:end])
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse JSON: {e}")
+        return {"raw_response": response}
     except Exception as e:
-        print(f"Failed to parse JSON: {e}")
+        logger.error(f"Unexpected error parsing JSON: {e}")
         return {"raw_response": response}
 
 # Prompt functions (simplified versions of your prompts.py)
@@ -315,7 +341,6 @@ def upload_file():
         
         # Extract financial data using LLaMA
         prompt_data = format_for_prompt(data)
-        mode = request.form.get('mode', 'summary')
         
         # Process with LLaMA
         prompt = get_extraction_prompt(prompt_data)
@@ -350,11 +375,14 @@ def dashboard(session_id):
     try:
         start = dashboard_response.find('[')
         end = dashboard_response.rfind(']') + 1
+        if start == -1 or end == 0:
+            raise ValueError("No JSON array found in response")
         json_block = dashboard_response[start:end].strip()
         dashboards = json.loads(json_block)
         if isinstance(dashboards, dict):
             dashboards = [dashboards]
-    except:
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.warning(f"Failed to parse dashboard response: {e}")
         dashboards = [
             {
                 "title": "Revenue Overview",
@@ -398,4 +426,5 @@ if __name__ == '__main__':
     # For AWS deployment, use:
     # app.run(host='0.0.0.0', port=5000, debug=False)
     # For local testing:
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
+    app.run(host='0.0.0.0', port=5000, debug=debug_mode)

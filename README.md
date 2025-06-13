@@ -119,6 +119,161 @@ A Flask-based web application for analyzing financial data from small-to-medium 
    WantedBy=multi-user.target
    ```
 
+## Direct Deployment (No Nginx)
+
+### AWS EC2 Setup
+
+1. **Launch EC2 Instance**
+   - Instance Type: `t3.medium` or `t3.large`
+   - OS: Ubuntu 22.04 LTS
+   - Security Group: Allow SSH (22) and Custom TCP (5000)
+
+2. **Connect and Install Dependencies**
+   ```bash
+   # Connect to your EC2 instance
+   ssh -i your-key.pem ubuntu@your-ec2-ip
+
+   # Update system
+   sudo apt update && sudo apt upgrade -y
+
+   # Install Python and dependencies
+   sudo apt install python3 python3-pip python3-venv git curl -y
+
+   # Install Ollama
+   curl -fsSL https://ollama.ai/install.sh | sh
+   ollama pull llama3
+   ```
+
+3. **Deploy Application**
+   ```bash
+   # Clone your repository
+   git clone <your-repo-url>
+   cd SMB-Revenue-Cloud
+
+   # Create virtual environment
+   python3 -m venv venv
+   source venv/bin/activate
+
+   # Install dependencies
+   pip install -r requirements.txt
+
+   # Set up environment variables
+   cp .env.example .env
+   nano .env
+   ```
+
+4. **Configure Environment**
+   ```bash
+   # Edit .env file
+   SECRET_KEY=your-super-secret-key-for-aws
+   FLASK_DEBUG=False
+   FLASK_ENV=production
+   RATE_LIMIT=10
+   RATE_LIMIT_WINDOW=60
+   MAX_CONTENT_LENGTH=16777216
+   OLLAMA_TIMEOUT=90
+   OLLAMA_MAX_RETRIES=3
+   SESSION_TIMEOUT_HOURS=24
+   ```
+
+5. **Run with systemd Service**
+   ```bash
+   # Create systemd service
+   sudo nano /etc/systemd/system/smb-revenue.service
+   ```
+
+   Add this content:
+   ```ini
+   [Unit]
+   Description=SMB Revenue Cloud
+   After=network.target
+
+   [Service]
+   User=ubuntu
+   WorkingDirectory=/home/ubuntu/SMB-Revenue-Cloud
+   Environment=PATH=/home/ubuntu/SMB-Revenue-Cloud/venv/bin
+   ExecStart=/home/ubuntu/SMB-Revenue-Cloud/venv/bin/python wsgi.py
+   Restart=always
+   RestartSec=10
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+
+   ```bash
+   # Enable and start the service
+   sudo systemctl daemon-reload
+   sudo systemctl enable smb-revenue
+   sudo systemctl start smb-revenue
+
+   # Check status
+   sudo systemctl status smb-revenue
+   ```
+
+6. **Access Your Application**
+   - Direct URL: `http://your-ec2-public-ip:5000`
+   - Health check: `http://your-ec2-public-ip:5000/health`
+
+7. **Monitoring and Maintenance**
+   ```bash
+   # Check application logs
+   sudo journalctl -u smb-revenue -f
+
+   # Monitor system resources
+   htop
+   df -h
+   free -h
+
+   # Health check
+   curl http://localhost:5000/health
+   ```
+
+8. **Security Setup**
+   ```bash
+   # Set up firewall (UFW)
+   sudo ufw enable
+   sudo ufw allow ssh
+   sudo ufw allow 5000
+
+   # Update regularly
+   sudo apt update && sudo apt upgrade -y
+   ```
+
+### Alternative: Screen/Tmux Method
+
+If you prefer not to use systemd:
+
+```bash
+# Install screen
+sudo apt install screen -y
+
+# Start application in screen session
+screen -S smb-app
+python wsgi.py
+
+# Detach from screen (Ctrl+A, then D)
+# Reattach later with: screen -r smb-app
+```
+
+### Troubleshooting Direct Deployment
+
+```bash
+# Check if Ollama is running
+ollama list
+
+# Restart Ollama if needed
+sudo systemctl restart ollama
+
+# Check application status
+sudo systemctl status smb-revenue
+
+# View recent logs
+sudo journalctl -u smb-revenue --since "1 hour ago"
+
+# Check if port 5000 is listening
+sudo netstat -tlnp | grep :5000
+```
+
 ## API Endpoints
 
 - `GET /` - Main application page

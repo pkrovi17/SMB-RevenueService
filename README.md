@@ -4,22 +4,22 @@ A Flask-based web application for analyzing financial data from small-to-medium 
 
 ## Features
 
-- 📊 **Financial Data Analysis**: Upload CSV, Excel files or Google Sheets
-- 🤖 **AI-Powered Insights**: Uses LLaMA models for data extraction and dashboard generation
-- 📈 **Interactive Charts**: Plotly-based visualizations for revenue, profit, and cost analysis
-- 🔮 **Forecasting**: Prophet-based time series forecasting
-- 🔒 **Security**: CSRF protection, rate limiting, file validation
-- 🚀 **Production Ready**: Health checks, monitoring, and deployment guides
+-  **Financial Data Analysis**: Upload CSV, Excel files or Google Sheets
+-  **AI-Powered Insights**: Uses LLaMA models for data extraction and dashboard generation
+-  **Interactive Charts**: Plotly-based visualizations for revenue, profit, and cost analysis
+-  **Forecasting**: Prophet-based time series forecasting
+-  **Security**: CSRF protection, rate limiting, file validation
+-  **Production Ready**: Health checks, monitoring, and deployment guides
 
 ## Security Features
 
-- ✅ CSRF token protection
-- ✅ Rate limiting (10 requests/minute per IP)
-- ✅ File type validation
-- ✅ File size limits (16MB max)
-- ✅ Input sanitization
-- ✅ Session management with automatic cleanup
-- ✅ Environment-based configuration
+-  CSRF token protection
+-  Rate limiting (10 requests/minute per IP)
+-  File type validation
+-  File size limits (16MB max)
+-  Input sanitization
+-  Session management with automatic cleanup
+-  Environment-based configuration
 
 ## Prerequisites
 
@@ -133,7 +133,6 @@ A Flask-based web application for analyzing financial data from small-to-medium 
 - Only CSV, XLSX, and XLS files allowed
 - Maximum file size: 16MB
 - Files are processed in memory and immediately deleted
-- No virus scanning (consider adding for production)
 
 ### Rate Limiting
 - 10 requests per minute per IP address
@@ -216,22 +215,3 @@ Response:
    ```python
    app.run(host='0.0.0.0', port=5000, threaded=True)
    ```
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Submit a pull request
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Support
-
-For support and questions:
-- Create an issue on GitHub
-- Check the troubleshooting section
-- Review the logs for error details

@@ -9,8 +9,12 @@ from prophet import Prophet
 import numpy as np
 from werkzeug.utils import secure_filename
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
+from functools import wraps
+import threading
+import time
+import re
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -22,11 +26,117 @@ app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-producti
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
+# Security configurations
+ALLOWED_EXTENSIONS = {'csv', 'xlsx', 'xls'}
+GOOGLE_SHEETS_PATTERN = r'https://docs\.google\.com/spreadsheets/d/([a-zA-Z0-9-_]+)'
+
+# Rate limiting
+request_counts = {}
+RATE_LIMIT = 10  # requests per minute
+RATE_LIMIT_WINDOW = 60  # seconds
+
 # Ensure upload directory exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # Store session data in memory (for demo - use Redis/DB in production)
 session_data = {}
+session_lock = threading.Lock()
+
+# Security and utility functions
+def allowed_file(filename):
+    """Check if file extension is allowed"""
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def validate_google_sheets_url(url):
+    """Validate Google Sheets URL format"""
+    if not url or not isinstance(url, str):
+        return False
+    return bool(re.match(GOOGLE_SHEETS_PATTERN, url.strip()))
+
+def rate_limit_exceeded(ip):
+    """Check if rate limit is exceeded for an IP"""
+    current_time = time.time()
+    
+    # Clean old entries
+    request_counts = {k: v for k, v in request_counts.items() 
+                     if current_time - v['timestamp'] < RATE_LIMIT_WINDOW}
+    
+    if ip not in request_counts:
+        request_counts[ip] = {'count': 1, 'timestamp': current_time}
+        return False
+    
+    if current_time - request_counts[ip]['timestamp'] > RATE_LIMIT_WINDOW:
+        request_counts[ip] = {'count': 1, 'timestamp': current_time}
+        return False
+    
+    request_counts[ip]['count'] += 1
+    return request_counts[ip]['count'] > RATE_LIMIT
+
+def cleanup_old_sessions():
+    """Remove sessions older than 24 hours"""
+    current_time = datetime.now()
+    expired_sessions = []
+    
+    with session_lock:
+        for session_id, data in session_data.items():
+            if (current_time - data['timestamp']) > timedelta(hours=24):
+                expired_sessions.append(session_id)
+        
+        for session_id in expired_sessions:
+            del session_data[session_id]
+            logger.info(f"Cleaned up expired session: {session_id}")
+    
+    return len(expired_sessions)
+
+def generate_csrf_token():
+    """Generate CSRF token"""
+    if 'csrf_token' not in session:
+        session['csrf_token'] = str(uuid.uuid4())
+    return session['csrf_token']
+
+def validate_csrf_token():
+    """Validate CSRF token"""
+    token = request.form.get('csrf_token')
+    return token and token == session.get('csrf_token')
+
+# Decorators
+def rate_limit(f):
+    """Rate limiting decorator"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        ip = request.remote_addr
+        if rate_limit_exceeded(ip):
+            logger.warning(f"Rate limit exceeded for IP: {ip}")
+            return jsonify({'error': 'Rate limit exceeded. Please try again later.'}), 429
+        return f(*args, **kwargs)
+    return decorated_function
+
+def require_csrf(f):
+    """CSRF protection decorator"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if request.method == 'POST':
+            if not validate_csrf_token():
+                logger.warning(f"CSRF token validation failed for IP: {request.remote_addr}")
+                flash('Invalid request. Please try again.', 'error')
+                return redirect(url_for('index'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+# Background cleanup task
+def background_cleanup():
+    """Background task to clean up old sessions"""
+    while True:
+        try:
+            cleanup_old_sessions()
+            time.sleep(3600)  # Run every hour
+        except Exception as e:
+            logger.error(f"Error in background cleanup: {e}")
+            time.sleep(3600)
+
+# Start background cleanup thread
+cleanup_thread = threading.Thread(target=background_cleanup, daemon=True)
+cleanup_thread.start()
 
 def run_llama_dashboard_with_retry(data_str, max_attempts=5):
     prompt = get_dashboard_prompt(data_str)
@@ -105,58 +215,108 @@ def read_data(file_path_or_url):
     data = {}
     try:
         if file_path_or_url.startswith("http"):
-            if "docs.google.com" in file_path_or_url:
-                sheet_id = file_path_or_url.split("/d/")[1].split("/")[0]
-                export_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
-                df = pd.read_csv(export_url)
-                data["Google Sheet"] = df.fillna('')
-            else:
-                raise ValueError("Only Google Sheets URLs are supported for now.")
+            if not validate_google_sheets_url(file_path_or_url):
+                raise ValueError("Invalid Google Sheets URL format")
+            
+            sheet_id = re.match(GOOGLE_SHEETS_PATTERN, file_path_or_url.strip()).group(1)
+            export_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+            
+            # Add timeout and error handling for network requests
+            df = pd.read_csv(export_url, timeout=30)
+            if df.empty:
+                raise ValueError("Google Sheet is empty or inaccessible")
+            
+            data["Google Sheet"] = df.fillna('')
+            
         elif file_path_or_url.endswith(".csv"):
+            if not os.path.exists(file_path_or_url):
+                raise FileNotFoundError("CSV file not found")
+            
             df = pd.read_csv(file_path_or_url)
+            if df.empty:
+                raise ValueError("CSV file is empty")
+            
             data["CSV File"] = df.fillna('')
+            
         elif file_path_or_url.endswith((".xlsx", ".xls")):
+            if not os.path.exists(file_path_or_url):
+                raise FileNotFoundError("Excel file not found")
+            
             xls = pd.ExcelFile(file_path_or_url, engine='openpyxl')
+            if not xls.sheet_names:
+                raise ValueError("Excel file has no sheets")
+            
             data = {sheet: xls.parse(sheet).fillna('') for sheet in xls.sheet_names}
+            
         else:
-            raise ValueError("Unsupported file type or URL format.")
+            raise ValueError("Unsupported file type or URL format")
+            
+    except pd.errors.EmptyDataError:
+        logger.error("File is empty")
+        raise ValueError("The uploaded file is empty")
+    except pd.errors.ParserError as e:
+        logger.error(f"Error parsing file: {e}")
+        raise ValueError(f"Error parsing file: {str(e)}")
     except Exception as e:
         logger.error(f"Error reading file: {e}")
+        raise
+    
     return data
 
 def format_for_prompt(data_dict):
     formatted = ""
     for sheet, df in data_dict.items():
         formatted += f"\n### Sheet: {sheet}\n"
+        # Limit data size to prevent prompt overflow
+        if len(df) > 1000:
+            df = df.head(1000)
+            formatted += "# Note: Data truncated to first 1000 rows\n"
         formatted += df.to_csv(index=False)
     return formatted
 
-def run_ollama_prompt(prompt, model='llama3'):
+def run_ollama_prompt(prompt, model='llama3', max_retries=3):
     # Validate model parameter to prevent command injection
     allowed_models = ['llama3', 'llama2', 'mistral', 'codellama']
     if model not in allowed_models:
         logger.error(f"Invalid model: {model}")
         return f"Error: Invalid model '{model}'"
     
-    try:
-        result = subprocess.run(
-            ['ollama', 'run', model],
-            input=prompt.encode('utf-8'),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=90,
-            check=True
-        )
-        return result.stdout.decode('utf-8')
-    except subprocess.TimeoutExpired:
-        logger.error("Ollama request timed out")
-        return "Error: Request timed out"
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Ollama process failed: {e}")
-        return f"Error running ollama: {e}"
-    except Exception as e:
-        logger.error(f"Unexpected error running ollama: {e}")
-        return f"Error running ollama: {e}"
+    # Validate prompt length
+    if len(prompt) > 100000:  # 100KB limit
+        logger.error("Prompt too large")
+        return "Error: Input data too large"
+    
+    for attempt in range(max_retries):
+        try:
+            result = subprocess.run(
+                ['ollama', 'run', model],
+                input=prompt.encode('utf-8'),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=90,
+                check=True
+            )
+            return result.stdout.decode('utf-8')
+            
+        except subprocess.TimeoutExpired:
+            logger.error(f"Ollama request timed out (attempt {attempt + 1}/{max_retries})")
+            if attempt == max_retries - 1:
+                return "Error: Request timed out after multiple attempts"
+            time.sleep(2 ** attempt)  # Exponential backoff
+            
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Ollama process failed (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt == max_retries - 1:
+                return f"Error running ollama: {e}"
+            time.sleep(2 ** attempt)
+            
+        except Exception as e:
+            logger.error(f"Unexpected error running ollama (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt == max_retries - 1:
+                return f"Error running ollama: {e}"
+            time.sleep(2 ** attempt)
+    
+    return "Error: All retry attempts failed"
 
 def extract_json_from_response(response):
     try:
@@ -312,24 +472,58 @@ def forecast_timeseries(data, periods=12):
 # Flask routes
 @app.route('/')
 def index():
-    return render_template('index.html')
+    csrf_token = generate_csrf_token()
+    return render_template('index.html', csrf_token=csrf_token)
 
 @app.route('/upload', methods=['POST'])
+@rate_limit
+@require_csrf
 def upload_file():
     try:
         session_id = str(uuid.uuid4())
         
+        # Validate file upload
         if 'file' in request.files and request.files['file'].filename:
             file = request.files['file']
+            
+            # Check if file is empty
+            if file.filename == '':
+                flash('No file selected', 'error')
+                return redirect(url_for('index'))
+            
+            # Validate file extension
+            if not allowed_file(file.filename):
+                flash('Invalid file type. Please upload CSV, XLSX, or XLS files only.', 'error')
+                return redirect(url_for('index'))
+            
+            # Check file size
+            file.seek(0, 2)  # Seek to end
+            file_size = file.tell()
+            file.seek(0)  # Reset to beginning
+            
+            if file_size > app.config['MAX_CONTENT_LENGTH']:
+                flash('File too large. Maximum size is 16MB.', 'error')
+                return redirect(url_for('index'))
+            
             filename = secure_filename(file.filename)
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(filepath)
             
-            data = read_data(filepath)
-            os.remove(filepath)  # Clean up
+            try:
+                data = read_data(filepath)
+            finally:
+                # Clean up file
+                if os.path.exists(filepath):
+                    os.remove(filepath)
             
         elif 'google_url' in request.form and request.form['google_url'].strip():
             url = request.form['google_url'].strip()
+            
+            # Validate URL
+            if not validate_google_sheets_url(url):
+                flash('Invalid Google Sheets URL format', 'error')
+                return redirect(url_for('index'))
+            
             data = read_data(url)
         else:
             flash('Please upload a file or provide a Google Sheets URL', 'error')
@@ -347,25 +541,40 @@ def upload_file():
         response = run_ollama_prompt(prompt)
         financial_data = extract_json_from_response(response)
         
-        # Store in session
-        session_data[session_id] = {
-            'financial_data': financial_data,
-            'timestamp': datetime.now()
-        }
+        # Store in session with thread safety
+        with session_lock:
+            session_data[session_id] = {
+                'financial_data': financial_data,
+                'timestamp': datetime.now()
+            }
         
+        logger.info(f"Created new session: {session_id}")
         return redirect(url_for('dashboard', session_id=session_id))
         
+    except ValueError as e:
+        flash(f'Error processing data: {str(e)}', 'error')
+        return redirect(url_for('index'))
     except Exception as e:
-        flash(f'Error processing file: {str(e)}', 'error')
+        logger.error(f"Unexpected error in upload_file: {e}")
+        flash('An unexpected error occurred. Please try again.', 'error')
         return redirect(url_for('index'))
 
 @app.route('/dashboard/<session_id>')
+@rate_limit
 def dashboard(session_id):
-    if session_id not in session_data:
-        flash('Session expired or invalid', 'error')
+    # Validate session_id format
+    try:
+        uuid.UUID(session_id)
+    except ValueError:
+        flash('Invalid session ID', 'error')
         return redirect(url_for('index'))
     
-    financial_data = session_data[session_id]['financial_data']
+    with session_lock:
+        if session_id not in session_data:
+            flash('Session expired or invalid', 'error')
+            return redirect(url_for('index'))
+        
+        financial_data = session_data[session_id]['financial_data']
     
     # Generate dashboard suggestions
     json_str = json.dumps(financial_data, indent=2)
@@ -396,20 +605,27 @@ def dashboard(session_id):
     # Generate charts
     charts = []
     for dash_config in dashboards:
-        fig = generate_figure(dash_config, financial_data)
-        chart_json = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
-        charts.append({
-            'config': dash_config,
-            'chart': chart_json
-        })
+        try:
+            fig = generate_figure(dash_config, financial_data)
+            chart_json = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
+            charts.append({
+                'config': dash_config,
+                'chart': chart_json
+            })
+        except Exception as e:
+            logger.error(f"Error generating chart: {e}")
+            continue
     
     # Generate forecast if possible
     forecast_chart = None
-    prophet_input = prepare_prophet_input(financial_data)
-    if prophet_input:
-        forecast_fig, _ = forecast_timeseries(prophet_input)
-        if forecast_fig:
-            forecast_chart = json.dumps(forecast_fig, cls=plotly.utils.PlotlyJSONEncoder)
+    try:
+        prophet_input = prepare_prophet_input(financial_data)
+        if prophet_input:
+            forecast_fig, _ = forecast_timeseries(prophet_input)
+            if forecast_fig:
+                forecast_chart = json.dumps(forecast_fig, cls=plotly.utils.PlotlyJSONEncoder)
+    except Exception as e:
+        logger.error(f"Error generating forecast: {e}")
     
     return render_template('dashboard.html', 
                          charts=charts, 
@@ -417,10 +633,34 @@ def dashboard(session_id):
                          financial_data=financial_data)
 
 @app.route('/api/data/<session_id>')
+@rate_limit
 def get_data(session_id):
-    if session_id not in session_data:
-        return jsonify({'error': 'Session not found'}), 404
-    return jsonify(session_data[session_id]['financial_data'])
+    # Validate session_id format
+    try:
+        uuid.UUID(session_id)
+    except ValueError:
+        return jsonify({'error': 'Invalid session ID'}), 400
+    
+    with session_lock:
+        if session_id not in session_data:
+            return jsonify({'error': 'Session not found'}), 404
+        return jsonify(session_data[session_id]['financial_data'])
+
+@app.route('/health')
+def health_check():
+    """Health check endpoint for monitoring"""
+    try:
+        # Check if background cleanup is running
+        cleanup_count = cleanup_old_sessions()
+        return jsonify({
+            'status': 'healthy',
+            'active_sessions': len(session_data),
+            'cleanup_count': cleanup_count,
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return jsonify({'status': 'unhealthy', 'error': str(e)}), 500
 
 if __name__ == '__main__':
     # For AWS deployment, use:

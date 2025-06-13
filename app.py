@@ -22,6 +22,40 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # Store session data in memory (for demo - use Redis/DB in production)
 session_data = {}
+def run_llama_dashboard_with_retry(data_str, max_attempts=5):
+    prompt = get_dashboard_prompt(data_str)
+    last_error = ""
+    charts = []
+
+    for attempt in range(1, max_attempts + 1):
+        print(f"🔁 Attempt {attempt} to get LLaMA dashboard config...")
+        if attempt > 1:
+            prompt = get_dashboard_prompt(data_str, error_message=last_error)
+
+        try:
+            llama_output = run_ollama_prompt(prompt, model='llama3')
+            start = llama_output.find("[")
+            end = llama_output.rfind("]") + 1
+            json_block = llama_output[start:end].strip()
+
+            charts = json.loads(json_block)
+
+            if isinstance(charts, dict):
+                charts = [charts]
+            if not isinstance(charts, list):
+                raise ValueError("LLaMA returned a non-list structure")
+
+            return charts
+
+        except Exception as e:
+            last_error = str(e)
+            print(f"❌ JSON parse error: {last_error}")
+            with open(f"llama_dashboard_attempt_{attempt}.txt", "w", encoding="utf-8") as f:
+                f.write(llama_output)
+
+    print("⚠️ All attempts failed. Returning empty chart list.")
+    return []
+
 
 # Utility functions from your original code
 def get_nested_value(data, path):

@@ -297,7 +297,13 @@ def run_ollama_prompt(prompt, model='llama3', max_retries=3):
                 timeout=180,
                 check=True
             )
-            return result.stdout.decode('utf-8')
+            output = result.stdout.decode('utf-8')
+            if not output.strip():
+                logger.warning(f"Ollama returned empty output (attempt {attempt + 1})")
+                if attempt == max_retries - 1:
+                    return "Error: Ollama returned empty response"
+                continue
+            return output
             
         except subprocess.TimeoutExpired:
             logger.error(f"Ollama request timed out (attempt {attempt + 1}/{max_retries})")
@@ -306,9 +312,11 @@ def run_ollama_prompt(prompt, model='llama3', max_retries=3):
             time.sleep(2 ** attempt)  # Exponential backoff
             
         except subprocess.CalledProcessError as e:
+            stderr_output = e.stderr.decode('utf-8') if e.stderr else "No stderr output"
             logger.error(f"Ollama process failed (attempt {attempt + 1}/{max_retries}): {e}")
+            logger.error(f"Ollama stderr: {stderr_output}")
             if attempt == max_retries - 1:
-                return f"Error running ollama: {e}"
+                return f"Error running ollama: {e}. Stderr: {stderr_output}"
             time.sleep(2 ** attempt)
             
         except Exception as e:

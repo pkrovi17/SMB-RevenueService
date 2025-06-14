@@ -274,6 +274,34 @@ sudo journalctl -u smb-revenue --since "1 hour ago"
 sudo netstat -tlnp | grep :5000
 ```
 
+### Python Version Compatibility Issues
+
+If you encounter numpy installation errors on Python 3.12:
+
+```bash
+# Check Python version
+python3 --version
+
+# If using Python 3.12, you may need to upgrade pip and setuptools first
+pip install --upgrade pip setuptools wheel
+
+# Install numpy separately first
+pip install numpy==1.26.2
+
+# Then install the rest of the requirements
+pip install -r requirements.txt
+```
+
+Alternative approach for Python 3.12:
+```bash
+# Use conda instead of pip (if available)
+conda install numpy pandas plotly prophet flask werkzeug openpyxl python-dotenv
+
+# Or install system packages first
+sudo apt install python3-numpy python3-pandas python3-scipy
+pip install -r requirements.txt --no-deps
+```
+
 ## API Endpoints
 
 - `GET /` - Main application page
@@ -349,6 +377,34 @@ Response:
 4. **Rate limiting issues**
    - Increase `RATE_LIMIT` in environment
    - Check for multiple requests from same IP
+
+### Python Version Compatibility Issues
+
+If you encounter numpy installation errors on Python 3.12:
+
+```bash
+# Check Python version
+python3 --version
+
+# If using Python 3.12, you may need to upgrade pip and setuptools first
+pip install --upgrade pip setuptools wheel
+
+# Install numpy separately first
+pip install numpy==1.26.2
+
+# Then install the rest of the requirements
+pip install -r requirements.txt
+```
+
+Alternative approach for Python 3.12:
+```bash
+# Use conda instead of pip (if available)
+conda install numpy pandas plotly prophet flask werkzeug openpyxl python-dotenv
+
+# Or install system packages first
+sudo apt install python3-numpy python3-pandas python3-scipy
+pip install -r requirements.txt --no-deps
+```
 
 ### Performance Optimization
 

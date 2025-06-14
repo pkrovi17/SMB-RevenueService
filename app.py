@@ -55,6 +55,7 @@ def validate_google_sheets_url(url):
 
 def rate_limit_exceeded(ip):
     """Check if rate limit is exceeded for an IP"""
+    global request_counts
     current_time = time.time()
     
     # Clean old entries

@@ -3,6 +3,9 @@
 {% block content %}
 <div class="upload-section">
     <form method="POST" action="/upload" enctype="multipart/form-data">
+        <!-- CSRF Token -->
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        
         <div class="form-group">
             <label>Select Analysis Mode:</label>
             <div class="radio-group">

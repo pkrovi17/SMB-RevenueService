@@ -150,7 +150,7 @@ def run_llama_dashboard_with_retry(data_str, max_attempts=5):
             prompt = get_dashboard_prompt(data_str, error_message=last_error)
 
         try:
-            llama_output = run_ollama_prompt(prompt, model='llama3')
+            llama_output = run_ollama_prompt(prompt, model='mistral')
             start = llama_output.find("[")
             end = llama_output.rfind("]") + 1
             json_block = llama_output[start:end].strip()
@@ -275,7 +275,7 @@ def format_for_prompt(data_dict):
         formatted += df.to_csv(index=False)
     return formatted
 
-def run_ollama_prompt(prompt, model='llama3', max_retries=3):
+def run_ollama_prompt(prompt, model='mistral', max_retries=3):
     # Validate model parameter to prevent command injection
     allowed_models = ['llama3', 'llama2', 'mistral', 'codellama']
     if model not in allowed_models:

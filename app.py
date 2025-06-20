@@ -229,6 +229,7 @@ def read_data(file_path_or_url):
                 raise ValueError("Google Sheet is empty or inaccessible")
             
             data["Google Sheet"] = df.fillna('')
+            logger.info(f"Read DataFrame from Google Sheet: {df.head()}")
             
         elif file_path_or_url.endswith(".csv"):
             if not os.path.exists(file_path_or_url):
@@ -239,6 +240,7 @@ def read_data(file_path_or_url):
                 raise ValueError("CSV file is empty")
             
             data["CSV File"] = df.fillna('')
+            logger.info(f"Read DataFrame from CSV: {df.head()}")
             
         elif file_path_or_url.endswith((".xlsx", ".xls")):
             if not os.path.exists(file_path_or_url):
@@ -247,6 +249,8 @@ def read_data(file_path_or_url):
                 if not xls.sheet_names:
                     raise ValueError("Excel file has no sheets")
                 data = {sheet: xls.parse(sheet).fillna('') for sheet in xls.sheet_names}
+                for sheet, df in data.items():
+                    logger.info(f"Read DataFrame from Excel sheet '{sheet}': {df.head()}")
             
         else:
             raise ValueError("Unsupported file type or URL format")
@@ -377,8 +381,8 @@ def prepare_prophet_input(financial_data):
         return [{"ds": k, "y": float(v)} for k, v in monthly_data.items() if v]
     return []
 
-def forecast_timeseries(data, periods=12):
-    if not data or len(data) < 2:
+def forecast_timeseries(data, periods=12, title="📈 Revenue Forecast"):
+    if data.empty or len(data) < 2:
         return None, pd.DataFrame()
     
     df = pd.DataFrame(data)
@@ -391,7 +395,7 @@ def forecast_timeseries(data, periods=12):
     
     model = Prophet()
     model.fit(df)
-    future = model.make_future_dataframe(periods=periods, freq='ME')
+    future = model.make_future_dataframe(periods=periods, freq='M')
     forecast = model.predict(future)
     
     fig = go.Figure()
@@ -400,7 +404,7 @@ def forecast_timeseries(data, periods=12):
     fig.add_trace(go.Scatter(x=df["ds"], y=df["y"],
                              mode='markers', name='Historical'))
     fig.update_layout(
-        title="📈 Revenue Forecast",
+        title=title, 
         template="plotly_dark",
         height=400,
         paper_bgcolor='rgba(0,0,0,0)',
@@ -408,6 +412,15 @@ def forecast_timeseries(data, periods=12):
     )
     
     return fig, forecast.tail(periods)
+
+def get_chart_insight_prompt(chart_title, chart_data_csv):
+    return f"""
+You are a business analyst. Given the following chart titled '{chart_title}' and its data:
+
+{chart_data_csv}
+
+Write a concise, actionable business insight (2-3 sentences) for a small business owner. Do not repeat the chart title.
+"""
 
 # Flask routes
 @app.route('/')
@@ -475,17 +488,25 @@ def upload_file():
         
         # Extract financial data using LLaMA
         prompt_data = format_for_prompt(data)
-        # Process with LLaMA, retrying on malformed JSON
-        extraction_prompt = get_extraction_prompt(prompt_data)
+        # Select prompt based on user mode
+        mode = request.form.get('mode', 'summary')
+        if mode == 'forecast':
+            from prompts import get_forecast_extraction_prompt
+            prompt_func = get_forecast_extraction_prompt
+        else:
+            from prompts import get_summary_extraction_prompt
+            prompt_func = get_summary_extraction_prompt
         last_error = ""
         max_attempts = 5
         for attempt in range(1, max_attempts + 1):
             if attempt > 1:
-                extraction_prompt = get_extraction_prompt(prompt_data, error_message=last_error)
+                extraction_prompt = prompt_func(prompt_data, error_message=last_error)
+            else:
+                extraction_prompt = prompt_func(prompt_data)
             response = run_ollama_prompt(extraction_prompt, model='llama3')
+            logger.info(f"Raw LLM extraction output (attempt {attempt}): {response}")
             try:
                 financial_data = extract_json_from_response(response)
-                # If the result is a dict and not just a raw_response, break
                 if isinstance(financial_data, dict) and 'raw_response' not in financial_data:
                     break
                 else:
@@ -502,7 +523,8 @@ def upload_file():
         with session_lock:
             session_data[session_id] = {
                 'financial_data': financial_data,
-                'timestamp': datetime.now()
+                'timestamp': datetime.now(),
+                'mode': mode
             }
         
         logger.info(f"Created new session: {session_id}")
@@ -531,45 +553,128 @@ def dashboard(session_id):
             flash('Session expired or invalid', 'error')
             return redirect(url_for('index'))
         
-        financial_data = session_data[session_id]['financial_data']
+        session_info = session_data[session_id]
+        financial_data = session_info['financial_data']
+        mode = session_info.get('mode', 'summary')
     
-    # Generate dashboard suggestions
-    json_str = json.dumps(financial_data, indent=2)
-    # Use retry logic for dashboard config
-    dashboards = run_llama_dashboard_with_retry(json_str)
-
-    # Add logging for debugging
-    logger.info(f"Financial data: {financial_data}")
-    logger.info(f"Dashboards: {dashboards}")
-    
-    # Generate charts
     charts = []
-    for dash_config in dashboards:
-        try:
-            fig = generate_figure(dash_config, financial_data)
-            chart_json = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
-            charts.append({
-                'config': dash_config,
-                'chart': chart_json
-            })
-        except Exception as e:
-            logger.error(f"Error generating chart: {e}")
-            continue
-    
-    # Generate forecast if possible
     forecast_chart = None
-    try:
-        prophet_input = prepare_prophet_input(financial_data)
-        if prophet_input:
-            forecast_fig, _ = forecast_timeseries(prophet_input)
-            if forecast_fig:
-                forecast_chart = json.dumps(forecast_fig, cls=plotly.utils.PlotlyJSONEncoder)
-    except Exception as e:
-        logger.error(f"Error generating forecast: {e}")
+    sku_forecast_charts = []
+    
+    if mode == 'forecast':
+        if 'sku_transactions' in financial_data:
+            for sku, transactions in financial_data['sku_transactions'].items():
+                if not transactions or not isinstance(transactions, list):
+                    continue
+                try:
+                    df = pd.DataFrame(transactions)
+                    df['date'] = pd.to_datetime(df['date'], errors='coerce')
+                    df.dropna(subset=['date'], inplace=True)
+                    if df.empty or len(df) < 2:
+                        continue
+                    
+                    monthly_df = df.set_index('date').resample('M').sum()
+                    if monthly_df.empty or len(monthly_df) < 2:
+                        continue
+                        
+                    prophet_input = monthly_df.reset_index()
+                    prophet_input.rename(columns={'date': 'ds', 'amount': 'y'}, inplace=True)
+
+                    if 'y' not in prophet_input.columns:
+                        continue
+                        
+                    forecast_fig, _ = forecast_timeseries(prophet_input, title=f"📈 Forecast for {sku}")
+                    if forecast_fig:
+                        sku_forecast_charts.append(json.dumps(forecast_fig, cls=plotly.utils.PlotlyJSONEncoder))
+                except Exception as e:
+                    logger.error(f"Error generating forecast for SKU '{sku}': {e}")
+    else:
+        # Predetermined summary charts
+        summary_charts = [
+            {
+                "title": "Revenue Trends",
+                "description": "Monthly revenue trends",
+                "chart_type": "line",
+                "data_points": {},  # Will be filled below
+                "insight": ""
+            },
+            {
+                "title": "Profit Margin Breakdown",
+                "description": "Breakdown of profit margin components",
+                "chart_type": "pie",
+                "data_points": {
+                    "Revenue": "profit_margin_analysis.revenue",
+                    "Cost of Goods Sold": "profit_margin_analysis.cost_of_goods_sold",
+                    "Gross Profit": "profit_margin_analysis.gross_profit",
+                    "Net Income": "profit_margin_analysis.net_income"
+                },
+                "insight": ""
+            },
+            {
+                "title": "Cost Categories",
+                "description": "Breakdown of company costs",
+                "chart_type": "bar",
+                "data_points": {
+                    "Operating Expenses": "cost_optimization_analysis.operating_expenses",
+                    "Inventory Costs": "cost_optimization_analysis.inventory_costs",
+                    "Logistics Costs": "cost_optimization_analysis.logistics_costs"
+                },
+                "insight": ""
+            }
+        ]
+        # Fill in monthly revenue for Revenue Trends
+        monthly = None
+        if (
+            "revenue_analysis" in financial_data and
+            "revenue_by_month" in financial_data["revenue_analysis"] and
+            isinstance(financial_data["revenue_analysis"]["revenue_by_month"], dict)
+        ):
+            monthly = financial_data["revenue_analysis"]["revenue_by_month"]
+        if monthly and len(monthly) > 0:
+            summary_charts[0]["data_points"] = {k: f"revenue_analysis.revenue_by_month.{k}" for k in monthly.keys()}
+        else:
+            summary_charts[0]["data_points"] = {"Revenue": "revenue_analysis.revenue"}
+        # Generate charts with LLM insights
+        for dash_config in summary_charts:
+            try:
+                # Prepare chart data as CSV for the LLM
+                chart_data = {}
+                for label, path in dash_config["data_points"].items():
+                    value = get_nested_value(financial_data, path)
+                    chart_data[label] = value
+                chart_df = pd.DataFrame(list(chart_data.items()), columns=["Label", "Value"])
+                chart_data_csv = chart_df.to_csv(index=False)
+                # Get LLM insight
+                insight_prompt = get_chart_insight_prompt(dash_config["title"], chart_data_csv)
+                insight = run_ollama_prompt(insight_prompt, model='llama3')
+                dash_config["insight"] = insight.strip()
+                fig = generate_figure(dash_config, financial_data)
+                chart_json = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
+                charts.append({
+                    'config': dash_config,
+                    'chart': chart_json
+                })
+            except Exception as e:
+                logger.error(f"Error generating chart: {e}")
+                continue
+    
+    # Generate overall forecast for summary mode if data is available
+    if mode == 'summary':
+        try:
+            prophet_input = prepare_prophet_input(financial_data)
+            if prophet_input:
+                forecast_fig, _ = forecast_timeseries(prophet_input)
+                if forecast_fig:
+                    forecast_chart = json.dumps(forecast_fig, cls=plotly.utils.PlotlyJSONEncoder)
+        except Exception as e:
+            logger.error(f"Error generating forecast: {e}")
+    
+    logger.info(f"SKU Forecast Charts generated: {len(sku_forecast_charts)}")
     
     return render_template('dashboard.html', 
                          charts=charts, 
                          forecast_chart=forecast_chart,
+                         sku_forecast_charts=sku_forecast_charts,
                          financial_data=financial_data)
 
 @app.route('/api/data/<session_id>')

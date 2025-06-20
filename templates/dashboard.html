@@ -30,6 +30,26 @@
 </div>
 {% endif %}
 
+<!-- SKU Forecast Charts -->
+{% if sku_forecast_charts %}
+<div class="charts-grid">
+  <h2 class="section-title">SKU Revenue Forecasts</h2>
+  {% for chart in sku_forecast_charts %}
+  <div class="chart-container">
+    <div id="sku-forecast-chart-{{ loop.index0 }}"></div>
+    <script>
+      var graph_data_{{ loop.index0 }} = {{ chart | safe }};
+      Plotly.newPlot('sku-forecast-chart-{{ loop.index0 }}', graph_data_{{ loop.index0 }}.data, graph_data_{{ loop.index0 }}.layout, {responsive: true});
+    </script>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="footer">
+  <p>Powered by Flask, Ollama, LLaMA 3 & Plotly</p>
+</div>
+
 <script type="application/json" id="chart-data">
 {
   "charts": {{ charts | tojson | safe }},

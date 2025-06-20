@@ -542,11 +542,28 @@ def upload_file():
         
         # Extract financial data using LLaMA
         prompt_data = format_for_prompt(data)
-        
-        # Process with LLaMA
-        prompt = get_extraction_prompt(prompt_data)
-        response = run_ollama_prompt(prompt, model='llama3')
-        financial_data = extract_json_from_response(response)
+        # Process with LLaMA, retrying on malformed JSON
+        extraction_prompt = get_extraction_prompt(prompt_data)
+        last_error = ""
+        max_attempts = 5
+        for attempt in range(1, max_attempts + 1):
+            if attempt > 1:
+                extraction_prompt = get_extraction_prompt(prompt_data, error_message=last_error)
+            response = run_ollama_prompt(extraction_prompt, model='llama3')
+            try:
+                financial_data = extract_json_from_response(response)
+                # If the result is a dict and not just a raw_response, break
+                if isinstance(financial_data, dict) and 'raw_response' not in financial_data:
+                    break
+                else:
+                    raise ValueError("Malformed JSON")
+            except Exception as e:
+                last_error = str(e)
+                with open(f"llama_extraction_attempt_{attempt}.txt", "w", encoding="utf-8") as f:
+                    f.write(response)
+                if attempt == max_attempts:
+                    flash('Failed to extract financial data from your file. Please try again.', 'error')
+                    return redirect(url_for('index'))
         
         # Store in session with thread safety
         with session_lock:
@@ -585,29 +602,8 @@ def dashboard(session_id):
     
     # Generate dashboard suggestions
     json_str = json.dumps(financial_data, indent=2)
-    dashboard_prompt = get_dashboard_prompt(json_str)
-    dashboard_response = run_ollama_prompt(dashboard_prompt, model='llama3')
-    
-    try:
-        start = dashboard_response.find('[')
-        end = dashboard_response.rfind(']') + 1
-        if start == -1 or end == 0:
-            raise ValueError("No JSON array found in response")
-        json_block = dashboard_response[start:end].strip()
-        dashboards = json.loads(json_block)
-        if isinstance(dashboards, dict):
-            dashboards = [dashboards]
-    except (json.JSONDecodeError, ValueError) as e:
-        logger.warning(f"Failed to parse dashboard response: {e}")
-        dashboards = [
-            {
-                "title": "Revenue Overview",
-                "description": "Basic revenue analysis",
-                "chart_type": "bar",
-                "data_points": {"Revenue": "revenue_analysis.revenue"},
-                "insight": "Revenue data processed successfully."
-            }
-        ]
+    # Use retry logic for dashboard config
+    dashboards = run_llama_dashboard_with_retry(json_str)
     
     # Generate charts
     charts = []

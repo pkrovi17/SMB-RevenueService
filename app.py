@@ -242,12 +242,10 @@ def read_data(file_path_or_url):
         elif file_path_or_url.endswith((".xlsx", ".xls")):
             if not os.path.exists(file_path_or_url):
                 raise FileNotFoundError("Excel file not found")
-            
-            xls = pd.ExcelFile(file_path_or_url, engine='openpyxl')
-            if not xls.sheet_names:
-                raise ValueError("Excel file has no sheets")
-            
-            data = {sheet: xls.parse(sheet).fillna('') for sheet in xls.sheet_names}
+            with pd.ExcelFile(file_path_or_url, engine='openpyxl') as xls:
+                if not xls.sheet_names:
+                    raise ValueError("Excel file has no sheets")
+                data = {sheet: xls.parse(sheet).fillna('') for sheet in xls.sheet_names}
             
         else:
             raise ValueError("Unsupported file type or URL format")

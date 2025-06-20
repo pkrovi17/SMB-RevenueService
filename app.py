@@ -150,7 +150,7 @@ def run_llama_dashboard_with_retry(data_str, max_attempts=5):
             prompt = get_dashboard_prompt(data_str, error_message=last_error)
 
         try:
-            llama_output = run_ollama_prompt(prompt, model='phi3')
+            llama_output = run_ollama_prompt(prompt, model='tinyllama')
             start = llama_output.find("[")
             end = llama_output.rfind("]") + 1
             json_block = llama_output[start:end].strip()
@@ -275,9 +275,9 @@ def format_for_prompt(data_dict):
         formatted += df.to_csv(index=False)
     return formatted
 
-def run_ollama_prompt(prompt, model='phi3', max_retries=3):
+def run_ollama_prompt(prompt, model='tinyllama', max_retries=3):
     # Validate model parameter to prevent command injection
-    allowed_models = ['llama3', 'llama2', 'mistral', 'codellama', 'phi', 'phi3']
+    allowed_models = ['llama3', 'llama2', 'mistral', 'codellama', 'phi', 'phi3', 'tinyllama']
     if model not in allowed_models:
         logger.error(f"Invalid model: {model}")
         return f"Error: Invalid model '{model}'"
@@ -547,7 +547,7 @@ def upload_file():
         
         # Process with LLaMA
         prompt = get_extraction_prompt(prompt_data)
-        response = run_ollama_prompt(prompt)
+        response = run_ollama_prompt(prompt, model='tinyllama')
         financial_data = extract_json_from_response(response)
         
         # Store in session with thread safety
@@ -588,7 +588,7 @@ def dashboard(session_id):
     # Generate dashboard suggestions
     json_str = json.dumps(financial_data, indent=2)
     dashboard_prompt = get_dashboard_prompt(json_str)
-    dashboard_response = run_ollama_prompt(dashboard_prompt)
+    dashboard_response = run_ollama_prompt(dashboard_prompt, model='tinyllama')
     
     try:
         start = dashboard_response.find('[')

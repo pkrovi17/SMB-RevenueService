@@ -604,6 +604,10 @@ def dashboard(session_id):
     json_str = json.dumps(financial_data, indent=2)
     # Use retry logic for dashboard config
     dashboards = run_llama_dashboard_with_retry(json_str)
+
+    # Add logging for debugging
+    logger.info(f"Financial data: {financial_data}")
+    logger.info(f"Dashboards: {dashboards}")
     
     # Generate charts
     charts = []

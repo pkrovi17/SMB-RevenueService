@@ -294,7 +294,7 @@ def run_ollama_prompt(prompt, model='tinyllama', max_retries=3):
                 input=prompt.encode('utf-8'),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                timeout=300,
+                timeout=600,
                 check=True
             )
             output = result.stdout.decode('utf-8')

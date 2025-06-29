@@ -218,6 +218,304 @@
             0%   { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+
+        /* Chatbot Styles */
+        .chatbot-icon {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            z-index: 1000;
+            cursor: pointer;
+            transition: transform 0.3s ease;
+        }
+
+        .chatbot-icon:hover {
+            transform: scale(1.1);
+        }
+
+        .chatbot-icon-inner {
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(45deg, #f5c147, #ffd700);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 20px rgba(245, 193, 71, 0.4);
+            font-size: 24px;
+        }
+
+        .chatbot-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 2000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(5px);
+        }
+
+        .chatbot-container {
+            width: 90%;
+            max-width: 500px;
+            height: 80vh;
+            max-height: 600px;
+            background: #2d2d2d;
+            border-radius: 12px;
+            border: 1px solid #444;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .chatbot-header {
+            background: linear-gradient(45deg, #f5c147, #ffd700);
+            color: #1e1e1e;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: bold;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #1e1e1e;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: background-color 0.3s ease;
+        }
+
+        .close-btn:hover {
+            background-color: rgba(0, 0, 0, 0.1);
+        }
+
+        .chatbot-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .message {
+            max-width: 80%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            word-wrap: break-word;
+        }
+
+        .user-message {
+            align-self: flex-end;
+            background: linear-gradient(45deg, #f5c147, #ffd700);
+            color: #1e1e1e;
+        }
+
+        .bot-message {
+            align-self: flex-start;
+            background: #444;
+            color: #f5c147;
+        }
+
+        .typing {
+            background: #555;
+            color: #ccc;
+            font-style: italic;
+        }
+
+        .message-content {
+            line-height: 1.4;
+        }
+
+        .chatbot-input-container {
+            padding: 20px;
+            border-top: 1px solid #444;
+            display: flex;
+            gap: 10px;
+        }
+
+        .chatbot-input {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #444;
+            border-radius: 8px;
+            background: #1e1e1e;
+            color: #f5c147;
+            font-size: 14px;
+        }
+
+        .chatbot-input:focus {
+            outline: none;
+            border-color: #f5c147;
+        }
+
+        .send-btn {
+            background: linear-gradient(45deg, #f5c147, #ffd700);
+            color: #1e1e1e;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: transform 0.3s ease;
+        }
+
+        .send-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        /* Responsive design for chatbot */
+        @media (max-width: 768px) {
+            .chatbot-container {
+                width: 95%;
+                height: 90vh;
+            }
+            
+            .chatbot-icon {
+                bottom: 20px;
+                right: 20px;
+            }
+            
+            .chatbot-icon-inner {
+                width: 50px;
+                height: 50px;
+                font-size: 20px;
+            }
+        }
+
+        /* SKU Analysis Styles */
+        .sku-analysis-section {
+            margin-top: 40px;
+        }
+
+        .sku-summary {
+            background: rgba(245, 193, 71, 0.1);
+            border-left: 4px solid #f5c147;
+            padding: 15px;
+            margin-bottom: 30px;
+            border-radius: 0 8px 8px 0;
+            color: #cccccc;
+        }
+
+        .sku-container {
+            background: rgba(45, 45, 45, 0.8);
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 30px;
+            border: 1px solid #444;
+            backdrop-filter: blur(10px);
+        }
+
+        .sku-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .sku-name {
+            font-size: 1.8rem;
+            color: #f5c147;
+            margin: 0;
+        }
+
+        .sku-stats {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .stat-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-width: 120px;
+        }
+
+        .stat-label {
+            font-size: 0.8rem;
+            color: #888;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            font-size: 1.1rem;
+            font-weight: bold;
+            color: #f5c147;
+        }
+
+        .score-high {
+            color: #4CAF50 !important;
+        }
+
+        .score-medium {
+            color: #FF9800 !important;
+        }
+
+        .score-low {
+            color: #f44336 !important;
+        }
+
+        .sku-charts-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .sku-charts-grid .chart-container {
+            margin-bottom: 0;
+        }
+
+        .sku-charts-grid h4 {
+            color: #f5c147;
+            margin-bottom: 15px;
+            font-size: 1.1rem;
+        }
+
+        /* Responsive design for SKU analysis */
+        @media (max-width: 1024px) {
+            .sku-charts-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .sku-header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .sku-stats {
+                justify-content: space-between;
+                width: 100%;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .sku-stats {
+                flex-direction: column;
+                gap: 10px;
+            }
+            
+            .stat-item {
+                flex-direction: row;
+                justify-content: space-between;
+                min-width: auto;
+            }
+        }
     </style>
 </head>
 

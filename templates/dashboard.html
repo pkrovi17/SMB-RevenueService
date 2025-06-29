@@ -32,19 +32,78 @@
 
 <!-- SKU Forecast Charts -->
 {% if sku_forecast_charts %}
-<div class="charts-grid">
-  <h2 class="section-title">SKU Revenue Forecasts</h2>
-  {% for chart in sku_forecast_charts %}
-  <div class="chart-container">
-    <div id="sku-forecast-chart-{{ loop.index0 }}"></div>
-    <script>
-      var graph_data_{{ loop.index0 }} = {{ chart | safe }};
-      Plotly.newPlot('sku-forecast-chart-{{ loop.index0 }}', graph_data_{{ loop.index0 }}.data, graph_data_{{ loop.index0 }}.layout, {responsive: true});
-    </script>
+<div class="sku-analysis-section">
+  <h2 class="section-title">📊 SKU Performance Analysis</h2>
+  <div class="sku-summary">
+    <p>SKUs ranked by performance score (frequency + price + consistency)</p>
+  </div>
+  
+  {% for sku in sku_forecast_charts %}
+  <div class="sku-container">
+    <div class="sku-header">
+      <h3 class="sku-name">{{ sku.sku_name }}</h3>
+      <div class="sku-stats">
+        <div class="stat-item">
+          <span class="stat-label">Performance Score:</span>
+          <span class="stat-value score-{{ 'high' if sku.overall_score >= 70 else 'medium' if sku.overall_score >= 40 else 'low' }}">{{ sku.overall_score }}/100</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Transactions:</span>
+          <span class="stat-value">{{ sku.transaction_count }}</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Total Revenue:</span>
+          <span class="stat-value">${{ "%.2f"|format(sku.total_revenue) }}</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Avg Price:</span>
+          <span class="stat-value">${{ "%.2f"|format(sku.avg_price) }}</span>
+        </div>
+      </div>
+    </div>
+    
+    <div class="sku-charts-grid">
+      <div class="chart-container">
+        <h4>Performance Score Forecast</h4>
+        <div id="sku-forecast-{{ loop.index0 }}"></div>
+      </div>
+      <div class="chart-container">
+        <h4>Transaction History</h4>
+        <div id="sku-transactions-{{ loop.index0 }}"></div>
+      </div>
+    </div>
   </div>
   {% endfor %}
 </div>
 {% endif %}
+
+<!-- Chatbot Floating Icon -->
+<div id="chatbot-icon" class="chatbot-icon">
+  <div class="chatbot-icon-inner">
+    <span>💬</span>
+  </div>
+</div>
+
+<!-- Chatbot Overlay -->
+<div id="chatbot-overlay" class="chatbot-overlay">
+  <div class="chatbot-container">
+    <div class="chatbot-header">
+      <h3>🤖 AI Business Analyst</h3>
+      <button id="close-chatbot" class="close-btn">×</button>
+    </div>
+    <div class="chatbot-messages" id="chatbot-messages">
+      <div class="message bot-message">
+        <div class="message-content">
+          👋 Hi! I'm your AI business analyst. Ask me anything about your financial data, charts, or insights. I can help you understand trends, identify opportunities, and provide actionable advice.
+        </div>
+      </div>
+    </div>
+    <div class="chatbot-input-container">
+      <input type="text" id="chatbot-input" placeholder="Ask about your data..." class="chatbot-input">
+      <button id="send-message" class="send-btn">Send</button>
+    </div>
+  </div>
+</div>
 
 <div class="footer">
   <p>Powered by Flask, Ollama, LLaMA 3 & Plotly</p>
@@ -53,7 +112,9 @@
 <script type="application/json" id="chart-data">
 {
   "charts": {{ charts | tojson | safe }},
-  "forecastChart": {{ forecast_chart | tojson | safe if forecast_chart else 'null' }}
+  "forecastChart": {% if forecast_chart %}{{ forecast_chart | tojson | safe }}{% else %}null{% endif %},
+  "skuForecastCharts": {{ sku_forecast_charts | tojson | safe }},
+  "sessionId": "{{ request.view_args.session_id }}"
 }
 </script>
 
@@ -73,9 +134,118 @@ document.addEventListener("DOMContentLoaded", function () {
     Plotly.newPlot("forecast-chart", forecastFig.data, forecastFig.layout || {}, {responsive: true});
   }
 
+  // Render SKU forecast charts if exist
+  if (data.skuForecastCharts && data.skuForecastCharts.length > 0) {
+    data.skuForecastCharts.forEach((sku, index) => {
+      // Render forecast chart
+      const forecastData = JSON.parse(sku.forecast_chart);
+      Plotly.newPlot(`sku-forecast-${index}`, forecastData.data, forecastData.layout || {}, {responsive: true});
+      
+      // Render transaction chart
+      const transactionData = JSON.parse(sku.transaction_chart);
+      Plotly.newPlot(`sku-transactions-${index}`, transactionData.data, transactionData.layout || {}, {responsive: true});
+    });
+  }
+
   // Hide loader
   const loader = document.getElementById("loading-screen");
   if (loader) loader.style.display = "none";
+
+  // Chatbot functionality
+  const chatbotIcon = document.getElementById('chatbot-icon');
+  const chatbotOverlay = document.getElementById('chatbot-overlay');
+  const closeChatbot = document.getElementById('close-chatbot');
+  const chatbotInput = document.getElementById('chatbot-input');
+  const sendButton = document.getElementById('send-message');
+  const messagesContainer = document.getElementById('chatbot-messages');
+
+  // Open chatbot
+  chatbotIcon.addEventListener('click', function() {
+    chatbotOverlay.style.display = 'flex';
+    chatbotInput.focus();
+  });
+
+  // Close chatbot
+  closeChatbot.addEventListener('click', function() {
+    chatbotOverlay.style.display = 'none';
+  });
+
+  // Close on overlay click
+  chatbotOverlay.addEventListener('click', function(e) {
+    if (e.target === chatbotOverlay) {
+      chatbotOverlay.style.display = 'none';
+    }
+  });
+
+  // Send message function
+  function sendMessage() {
+    const message = chatbotInput.value.trim();
+    if (!message) return;
+
+    // Add user message
+    addMessage(message, 'user');
+    chatbotInput.value = '';
+
+    // Show typing indicator
+    const typingIndicator = addMessage('...', 'bot', 'typing');
+
+    // Send to API
+    fetch(`/api/chat/${data.sessionId}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ message: message })
+    })
+    .then(response => response.json())
+    .then(data => {
+      // Remove typing indicator
+      if (typingIndicator) {
+        typingIndicator.remove();
+      }
+      
+      if (data.error) {
+        addMessage('Sorry, I encountered an error. Please try again.', 'bot');
+      } else {
+        addMessage(data.response, 'bot');
+      }
+    })
+    .catch(error => {
+      console.error('Error:', error);
+      if (typingIndicator) {
+        typingIndicator.remove();
+      }
+      addMessage('Sorry, I encountered an error. Please try again.', 'bot');
+    });
+  }
+
+  // Add message to chat
+  function addMessage(content, sender, className = '') {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${sender}-message ${className}`;
+    
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content';
+    contentDiv.textContent = content;
+    
+    messageDiv.appendChild(contentDiv);
+    messagesContainer.appendChild(messageDiv);
+    
+    // Scroll to bottom
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    
+    return messageDiv;
+  }
+
+  // Send on button click
+  sendButton.addEventListener('click', sendMessage);
+
+  // Send on Enter key
+  chatbotInput.addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') {
+      sendMessage();
+    }
+  });
 });
 </script>
 {% endblock %}

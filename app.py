@@ -5,7 +5,6 @@ import os
 import subprocess
 import plotly.graph_objs as go
 import plotly.utils
-from prophet import Prophet
 import numpy as np
 from werkzeug.utils import secure_filename
 import uuid
@@ -42,6 +41,17 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 # Store session data in memory (for demo - use Redis/DB in production)
 session_data = {}
 session_lock = threading.Lock()
+
+# Configure TBB to prevent "already found in load path" error
+os.environ['TBB_DISABLE_PREVIEW'] = '1'
+os.environ['TBB_PREVIEW_WAIT_FOR_OLD_PREVIEW'] = '0'
+
+# Import Prophet after TBB configuration
+try:
+    from prophet import Prophet
+except ImportError as e:
+    print(f"Warning: Prophet not available - {e}")
+    Prophet = None
 
 # Security and utility functions
 def allowed_file(filename):
@@ -393,25 +403,81 @@ def forecast_timeseries(data, periods=12, title="📈 Revenue Forecast"):
     if len(df) < 2:
         return None, pd.DataFrame()
     
-    model = Prophet()
-    model.fit(df)
-    future = model.make_future_dataframe(periods=periods, freq='M')
-    forecast = model.predict(future)
+    # Check if Prophet is available
+    if Prophet is None:
+        logger.warning("Prophet not available, using simple trend analysis")
+        return create_simple_revenue_forecast(df, title)
     
+    try:
+        model = Prophet()
+        model.fit(df)
+        future = model.make_future_dataframe(periods=periods, freq='M')
+        forecast = model.predict(future)
+        
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=forecast["ds"], y=forecast["yhat"],
+                                 mode='lines+markers', name='Forecast'))
+        fig.add_trace(go.Scatter(x=df["ds"], y=df["y"],
+                                 mode='markers', name='Historical'))
+        fig.update_layout(
+            title=title, 
+            template="plotly_dark",
+            height=400,
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)'
+        )
+        
+        return fig, forecast.tail(periods)
+        
+    except Exception as e:
+        logger.error(f"Prophet forecast failed: {e}")
+        return create_simple_revenue_forecast(df, title)
+
+def create_simple_revenue_forecast(df, title):
+    """Create simple revenue forecast when Prophet is not available"""
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=forecast["ds"], y=forecast["yhat"],
-                             mode='lines+markers', name='Forecast'))
-    fig.add_trace(go.Scatter(x=df["ds"], y=df["y"],
-                             mode='markers', name='Historical'))
+    
+    # Add historical data
+    fig.add_trace(go.Scatter(
+        x=df["ds"], 
+        y=df["y"],
+        mode='markers+lines', 
+        name='Historical',
+        marker=dict(color='#ffd700', size=8),
+        line=dict(color='#f5c147', width=2)
+    ))
+    
+    # Add simple trend line
+    if len(df) > 1:
+        z = np.polyfit(range(len(df)), df['y'], 1)
+        p = np.poly1d(z)
+        
+        # Extend trend line for future months
+        future_months = pd.date_range(
+            start=df['ds'].iloc[-1], 
+            periods=13, 
+            freq='M'
+        )[1:]  # Skip the last historical month
+        
+        future_values = p(range(len(df), len(df) + len(future_months)))
+        
+        fig.add_trace(go.Scatter(
+            x=future_months,
+            y=future_values,
+            mode='lines',
+            name='Simple Trend Forecast',
+            line=dict(color='#f5c147', width=3, dash='dot')
+        ))
+    
     fig.update_layout(
-        title=title, 
+        title=f"{title} (Simple Analysis)",
         template="plotly_dark",
         height=400,
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)'
     )
     
-    return fig, forecast.tail(periods)
+    return fig, pd.DataFrame()
 
 def get_chart_insight_prompt(chart_title, chart_data_csv):
     return f"""
@@ -421,6 +487,337 @@ You are a business analyst. Given the following chart titled '{chart_title}' and
 
 Write a concise, actionable business insight (2-3 sentences) for a small business owner. Do not repeat the chart title.
 """
+
+def get_chatbot_prompt(question, financial_data_str, chart_data_str):
+    return f"""
+You are a helpful AI business analyst assistant. A user is asking questions about their financial data and dashboard insights.
+
+Financial Data Summary:
+{financial_data_str}
+
+Available Charts and Insights:
+{chart_data_str}
+
+SKU Performance Scoring System:
+- Performance scores (0-100) are calculated using a weighted formula:
+  * 40% Frequency Score: Based on number of transactions (normalized, capped at 10 transactions)
+  * 40% Price Score: Based on average transaction amount (normalized, capped at $1000)
+  * 20% Consistency Score: Based on price stability (lower volatility = higher score)
+- Scores are color-coded: Green (70+), Orange (40-69), Red (0-39)
+- SKUs are ranked by performance score (best performing first)
+- Each SKU has two charts: Performance Score Forecast and Transaction History
+
+User Question: {question}
+
+Please provide a helpful, professional response that:
+1. Answers the user's question based on the available data
+2. References specific insights or trends from the charts when relevant
+3. Explains the performance scoring system when discussing SKU analysis
+4. References specific SKU performance scores and rankings when applicable
+5. Provides actionable business advice when appropriate
+6. Keeps the response concise but informative (2-4 sentences)
+7. Uses a friendly, professional tone
+
+Response:"""
+
+def calculate_sku_score(transactions):
+    """Calculate weighted score for SKU based on frequency and price"""
+    if not transactions or len(transactions) == 0:
+        return 0
+    
+    df = pd.DataFrame(transactions)
+    df['date'] = pd.to_datetime(df['date'], errors='coerce')
+    df.dropna(subset=['date'], inplace=True)
+    
+    if df.empty:
+        return 0
+    
+    # Calculate metrics
+    total_transactions = len(df)
+    avg_price = df['amount'].mean()
+    price_volatility = df['amount'].std() / avg_price if avg_price > 0 else 0
+    
+    # Weighted scoring formula
+    # Higher frequency = higher score
+    # Higher average price = higher score  
+    # Lower volatility = higher score (more consistent pricing)
+    frequency_score = min(total_transactions / 10, 1.0)  # Normalize to 0-1, cap at 10 transactions
+    price_score = min(avg_price / 1000, 1.0)  # Normalize to 0-1, cap at $1000
+    consistency_score = max(1 - price_volatility, 0)  # Lower volatility = higher score
+    
+    # Weighted average (can adjust weights)
+    weighted_score = (0.4 * frequency_score + 0.4 * price_score + 0.2 * consistency_score) * 100
+    
+    return round(weighted_score, 2)
+
+def prepare_sku_forecast_data(transactions):
+    """Prepare monthly aggregated data with weighted scores for forecasting"""
+    if not transactions or len(transactions) == 0:
+        return pd.DataFrame()
+    
+    df = pd.DataFrame(transactions)
+    df['date'] = pd.to_datetime(df['date'], errors='coerce')
+    df.dropna(subset=['date'], inplace=True)
+    
+    if df.empty:
+        return pd.DataFrame()
+    
+    # Group by month and calculate metrics
+    df['month'] = df['date'].dt.to_period('M')
+    monthly_data = df.groupby('month').agg({
+        'amount': ['sum', 'count', 'mean', 'std']
+    }).reset_index()
+    
+    monthly_data.columns = ['month', 'total_amount', 'transaction_count', 'avg_price', 'price_std']
+    
+    # Calculate weighted score for each month
+    monthly_data['score'] = monthly_data.apply(
+        lambda row: calculate_monthly_score(row['transaction_count'], row['avg_price'], row['price_std']), 
+        axis=1
+    )
+    
+    # Convert period to datetime for Prophet
+    monthly_data['ds'] = monthly_data['month'].dt.to_timestamp()
+    monthly_data['y'] = monthly_data['score']
+    
+    return monthly_data[['ds', 'y']]
+
+def calculate_monthly_score(transaction_count, avg_price, price_std):
+    """Calculate weighted score for a specific month"""
+    if transaction_count == 0 or avg_price == 0:
+        return 0
+    
+    # Normalize metrics
+    frequency_score = min(transaction_count / 5, 1.0)  # Cap at 5 transactions per month
+    price_score = min(avg_price / 500, 1.0)  # Cap at $500 average price
+    consistency_score = max(1 - (price_std / avg_price if avg_price > 0 else 0), 0)
+    
+    # Weighted average
+    weighted_score = (0.4 * frequency_score + 0.4 * price_score + 0.2 * consistency_score) * 100
+    
+    return round(weighted_score, 2)
+
+def forecast_sku_performance(transactions, sku_name, periods=12):
+    """Forecast SKU performance using weighted scoring system"""
+    if not transactions or len(transactions) == 0:
+        return None, None, None
+    
+    # Check if Prophet is available
+    if Prophet is None:
+        logger.warning("Prophet not available, using simple trend analysis")
+        return create_simple_forecast(transactions, sku_name)
+    
+    # Prepare forecast data
+    forecast_data = prepare_sku_forecast_data(transactions)
+    
+    if forecast_data.empty or len(forecast_data) < 2:
+        return create_simple_forecast(transactions, sku_name)
+    
+    try:
+        # Generate forecast using Prophet
+        model = Prophet()
+        model.fit(forecast_data)
+        future = model.make_future_dataframe(periods=periods, freq='M')
+        forecast = model.predict(future)
+        
+        # Create forecast chart
+        fig_forecast = go.Figure()
+        fig_forecast.add_trace(go.Scatter(
+            x=forecast["ds"], 
+            y=forecast["yhat"],
+            mode='lines+markers', 
+            name='Forecasted Score',
+            line=dict(color='#f5c147', width=3)
+        ))
+        fig_forecast.add_trace(go.Scatter(
+            x=forecast_data["ds"], 
+            y=forecast_data["y"],
+            mode='markers', 
+            name='Historical Score',
+            marker=dict(color='#ffd700', size=8)
+        ))
+        
+        fig_forecast.update_layout(
+            title=f"📊 Performance Score Forecast - {sku_name}",
+            xaxis_title="Date",
+            yaxis_title="Performance Score",
+            template="plotly_dark",
+            height=400,
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
+        )
+        
+    except Exception as e:
+        logger.error(f"Prophet forecast failed for {sku_name}: {e}")
+        return create_simple_forecast(transactions, sku_name)
+    
+    # Create transaction detail chart
+    df_transactions = pd.DataFrame(transactions)
+    df_transactions['date'] = pd.to_datetime(df_transactions['date'], errors='coerce')
+    df_transactions.dropna(subset=['date'], inplace=True)
+    df_transactions = df_transactions.sort_values('date')
+    
+    fig_transactions = go.Figure()
+    fig_transactions.add_trace(go.Scatter(
+        x=df_transactions['date'],
+        y=df_transactions['amount'],
+        mode='markers+lines',
+        name='Individual Transactions',
+        marker=dict(color='#ffd700', size=6),
+        line=dict(color='#f5c147', width=1)
+    ))
+    
+    # Add trend line
+    if len(df_transactions) > 1:
+        z = np.polyfit(range(len(df_transactions)), df_transactions['amount'], 1)
+        p = np.poly1d(z)
+        fig_transactions.add_trace(go.Scatter(
+            x=df_transactions['date'],
+            y=p(range(len(df_transactions))),
+            mode='lines',
+            name='Trend Line',
+            line=dict(color='#ff6b6b', width=2, dash='dash')
+        ))
+    
+    fig_transactions.update_layout(
+        title=f"💰 Transaction History - {sku_name}",
+        xaxis_title="Date",
+        yaxis_title="Transaction Amount ($)",
+        template="plotly_dark",
+        height=400,
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
+    )
+    
+    # Calculate overall SKU score
+    overall_score = calculate_sku_score(transactions)
+    
+    return fig_forecast, fig_transactions, overall_score
+
+def create_simple_forecast(transactions, sku_name):
+    """Create simple forecast when Prophet is not available"""
+    if not transactions or len(transactions) == 0:
+        return None, None, None
+    
+    # Prepare data
+    forecast_data = prepare_sku_forecast_data(transactions)
+    
+    if forecast_data.empty or len(forecast_data) < 2:
+        return None, None, None
+    
+    # Create simple forecast chart (no Prophet)
+    fig_forecast = go.Figure()
+    fig_forecast.add_trace(go.Scatter(
+        x=forecast_data["ds"], 
+        y=forecast_data["y"],
+        mode='markers+lines', 
+        name='Historical Score',
+        marker=dict(color='#ffd700', size=8),
+        line=dict(color='#f5c147', width=2)
+    ))
+    
+    # Add simple trend line
+    if len(forecast_data) > 1:
+        z = np.polyfit(range(len(forecast_data)), forecast_data['y'], 1)
+        p = np.poly1d(z)
+        
+        # Extend trend line for future months
+        future_months = pd.date_range(
+            start=forecast_data['ds'].iloc[-1], 
+            periods=13, 
+            freq='M'
+        )[1:]  # Skip the last historical month
+        
+        future_scores = p(range(len(forecast_data), len(forecast_data) + len(future_months)))
+        
+        fig_forecast.add_trace(go.Scatter(
+            x=future_months,
+            y=future_scores,
+            mode='lines',
+            name='Simple Trend Forecast',
+            line=dict(color='#f5c147', width=3, dash='dot')
+        ))
+    
+    fig_forecast.update_layout(
+        title=f"📊 Performance Score Trend - {sku_name} (Simple Analysis)",
+        xaxis_title="Date",
+        yaxis_title="Performance Score",
+        template="plotly_dark",
+        height=400,
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
+    )
+    
+    # Create transaction detail chart
+    df_transactions = pd.DataFrame(transactions)
+    df_transactions['date'] = pd.to_datetime(df_transactions['date'], errors='coerce')
+    df_transactions.dropna(subset=['date'], inplace=True)
+    df_transactions = df_transactions.sort_values('date')
+    
+    fig_transactions = go.Figure()
+    fig_transactions.add_trace(go.Scatter(
+        x=df_transactions['date'],
+        y=df_transactions['amount'],
+        mode='markers+lines',
+        name='Individual Transactions',
+        marker=dict(color='#ffd700', size=6),
+        line=dict(color='#f5c147', width=1)
+    ))
+    
+    # Add trend line
+    if len(df_transactions) > 1:
+        z = np.polyfit(range(len(df_transactions)), df_transactions['amount'], 1)
+        p = np.poly1d(z)
+        fig_transactions.add_trace(go.Scatter(
+            x=df_transactions['date'],
+            y=p(range(len(df_transactions))),
+            mode='lines',
+            name='Trend Line',
+            line=dict(color='#ff6b6b', width=2, dash='dash')
+        ))
+    
+    fig_transactions.update_layout(
+        title=f"💰 Transaction History - {sku_name}",
+        xaxis_title="Date",
+        yaxis_title="Transaction Amount ($)",
+        template="plotly_dark",
+        height=400,
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
+    )
+    
+    # Calculate overall SKU score
+    overall_score = calculate_sku_score(transactions)
+    
+    return fig_forecast, fig_transactions, overall_score
 
 # Flask routes
 @app.route('/')
@@ -563,31 +960,31 @@ def dashboard(session_id):
     
     if mode == 'forecast':
         if 'sku_transactions' in financial_data:
+            sku_analysis = []
             for sku, transactions in financial_data['sku_transactions'].items():
                 if not transactions or not isinstance(transactions, list):
                     continue
                 try:
-                    df = pd.DataFrame(transactions)
-                    df['date'] = pd.to_datetime(df['date'], errors='coerce')
-                    df.dropna(subset=['date'], inplace=True)
-                    if df.empty or len(df) < 2:
-                        continue
+                    # Generate both forecast and transaction charts
+                    forecast_fig, transaction_fig, overall_score = forecast_sku_performance(transactions, sku)
                     
-                    monthly_df = df.set_index('date').resample('M').sum()
-                    if monthly_df.empty or len(monthly_df) < 2:
-                        continue
-                        
-                    prophet_input = monthly_df.reset_index()
-                    prophet_input.rename(columns={'date': 'ds', 'amount': 'y'}, inplace=True)
-
-                    if 'y' not in prophet_input.columns:
-                        continue
-                        
-                    forecast_fig, _ = forecast_timeseries(prophet_input, title=f"📈 Forecast for {sku}")
-                    if forecast_fig:
-                        sku_forecast_charts.append(json.dumps(forecast_fig, cls=plotly.utils.PlotlyJSONEncoder))
+                    if forecast_fig and transaction_fig:
+                        sku_analysis.append({
+                            'sku_name': sku,
+                            'forecast_chart': json.dumps(forecast_fig, cls=plotly.utils.PlotlyJSONEncoder),
+                            'transaction_chart': json.dumps(transaction_fig, cls=plotly.utils.PlotlyJSONEncoder),
+                            'overall_score': overall_score,
+                            'transaction_count': len(transactions),
+                            'total_revenue': sum(t['amount'] for t in transactions if isinstance(t, dict) and 'amount' in t),
+                            'avg_price': sum(t['amount'] for t in transactions if isinstance(t, dict) and 'amount' in t) / len(transactions) if transactions else 0
+                        })
                 except Exception as e:
                     logger.error(f"Error generating forecast for SKU '{sku}': {e}")
+                    continue
+            
+            # Sort SKUs by overall score (best performing first)
+            sku_analysis.sort(key=lambda x: x['overall_score'], reverse=True)
+            sku_forecast_charts = sku_analysis
     else:
         # Predetermined summary charts
         summary_charts = [
@@ -671,6 +1068,13 @@ def dashboard(session_id):
     
     logger.info(f"SKU Forecast Charts generated: {len(sku_forecast_charts)}")
     
+    # Store charts data in session for chatbot access
+    with session_lock:
+        if session_id in session_data:
+            session_data[session_id]['charts'] = charts
+            session_data[session_id]['forecast_chart'] = forecast_chart
+            session_data[session_id]['sku_forecast_charts'] = sku_forecast_charts
+    
     return render_template('dashboard.html', 
                          charts=charts, 
                          forecast_chart=forecast_chart,
@@ -706,6 +1110,88 @@ def health_check():
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         return jsonify({'status': 'unhealthy', 'error': str(e)}), 500
+
+@app.route('/api/chat/<session_id>', methods=['POST'])
+@rate_limit
+def chat_with_data(session_id):
+    """Handle chatbot messages about the financial data"""
+    try:
+        # Validate session_id format
+        try:
+            uuid.UUID(session_id)
+        except ValueError:
+            return jsonify({'error': 'Invalid session ID'}), 400
+        
+        # Get session data
+        with session_lock:
+            if session_id not in session_data:
+                return jsonify({'error': 'Session not found'}), 404
+            
+            session_info = session_data[session_id]
+            financial_data = session_info['financial_data']
+        
+        # Get user message
+        data = request.get_json()
+        if not data or 'message' not in data:
+            return jsonify({'error': 'Message is required'}), 400
+        
+        user_message = data['message'].strip()
+        if not user_message:
+            return jsonify({'error': 'Message cannot be empty'}), 400
+        
+        # Prepare data for the prompt
+        financial_data_str = json.dumps(financial_data, indent=2)
+        
+        # Get chart data from the session
+        chart_data = []
+        if 'charts' in session_info:
+            chart_data = session_info['charts']
+        
+        # Get SKU analysis data
+        sku_analysis_data = []
+        if 'sku_forecast_charts' in session_info:
+            sku_analysis_data = session_info['sku_forecast_charts']
+        
+        chart_data_str = ""
+        
+        # Add regular charts
+        for i, chart in enumerate(chart_data):
+            chart_data_str += f"\nChart {i+1}: {chart['config']['title']}\n"
+            chart_data_str += f"Description: {chart['config']['description']}\n"
+            chart_data_str += f"Insight: {chart['config']['insight']}\n"
+        
+        # Add SKU analysis data
+        if sku_analysis_data:
+            chart_data_str += f"\n📊 SKU Performance Analysis ({len(sku_analysis_data)} SKUs):\n"
+            for i, sku in enumerate(sku_analysis_data):
+                chart_data_str += f"\nSKU {i+1}: {sku['sku_name']}\n"
+                chart_data_str += f"  Performance Score: {sku['overall_score']}/100\n"
+                chart_data_str += f"  Transaction Count: {sku['transaction_count']}\n"
+                chart_data_str += f"  Total Revenue: ${sku['total_revenue']:.2f}\n"
+                chart_data_str += f"  Average Price: ${sku['avg_price']:.2f}\n"
+                chart_data_str += f"  Charts: Performance Score Forecast + Transaction History\n"
+        
+        # Add mode information
+        mode = session_info.get('mode', 'summary')
+        chart_data_str += f"\nAnalysis Mode: {mode.upper()}\n"
+        
+        # Generate response using LLaMA
+        prompt = get_chatbot_prompt(user_message, financial_data_str, chart_data_str)
+        response = run_ollama_prompt(prompt, model='llama3')
+        
+        # Clean up the response
+        response = response.strip()
+        if response.startswith("Response:"):
+            response = response[9:].strip()
+        
+        return jsonify({
+            'response': response,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in chat_with_data: {e}")
+        return jsonify({'error': 'An error occurred while processing your message'}), 500
 
 if __name__ == '__main__':
     # For AWS deployment, use:

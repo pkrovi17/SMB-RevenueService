@@ -50,6 +50,57 @@ The built-in AI-powered chatbot allows you to ask questions about your uploaded 
 - 20% Consistency Score: Price stability (lower volatility = higher score)
 - Scores are color-coded and SKUs are ranked for easy comparison.
 
+## API Endpoints
+
+- `GET /` - Main application page
+- `POST /upload` - Upload financial data
+- `GET /dashboard/<session_id>` - View analysis dashboard
+- `GET /api/data/<session_id>` - Get session data (JSON)
+- `GET /health` - Health check endpoint
+
+## Security Considerations
+
+### File Upload Security
+- Only CSV, XLSX, and XLS files allowed
+- Maximum file size: 16MB
+- Files are processed in memory and immediately deleted
+
+### Rate Limiting
+- 10 requests per minute per IP address
+- Configurable via environment variables
+- Returns HTTP 429 when exceeded
+
+### Session Management
+- Sessions expire after 24 hours
+- Automatic cleanup of expired sessions
+- Thread-safe session storage
+
+### CSRF Protection
+- All POST requests require valid CSRF token
+- Tokens are automatically generated and validated
+
+## Monitoring and Health Checks
+
+### Health Check Endpoint
+```bash
+curl http://localhost:5000/health
+```
+
+Response:
+```json
+{
+  "status": "healthy",
+  "active_sessions": 5,
+  "cleanup_count": 2,
+  "timestamp": "2024-01-15T10:30:00"
+}
+```
+
+### Logging
+- Application logs to stdout/stderr
+- Structured logging with different levels
+- Error tracking for debugging
+
 ## Prerequisites
 
 - Python 3.9+
@@ -330,57 +381,6 @@ conda install numpy pandas plotly prophet flask werkzeug openpyxl python-dotenv
 sudo apt install python3-numpy python3-pandas python3-scipy
 pip install -r requirements.txt --no-deps
 ```
-
-## API Endpoints
-
-- `GET /` - Main application page
-- `POST /upload` - Upload financial data
-- `GET /dashboard/<session_id>` - View analysis dashboard
-- `GET /api/data/<session_id>` - Get session data (JSON)
-- `GET /health` - Health check endpoint
-
-## Security Considerations
-
-### File Upload Security
-- Only CSV, XLSX, and XLS files allowed
-- Maximum file size: 16MB
-- Files are processed in memory and immediately deleted
-
-### Rate Limiting
-- 10 requests per minute per IP address
-- Configurable via environment variables
-- Returns HTTP 429 when exceeded
-
-### Session Management
-- Sessions expire after 24 hours
-- Automatic cleanup of expired sessions
-- Thread-safe session storage
-
-### CSRF Protection
-- All POST requests require valid CSRF token
-- Tokens are automatically generated and validated
-
-## Monitoring and Health Checks
-
-### Health Check Endpoint
-```bash
-curl http://localhost:5000/health
-```
-
-Response:
-```json
-{
-  "status": "healthy",
-  "active_sessions": 5,
-  "cleanup_count": 2,
-  "timestamp": "2024-01-15T10:30:00"
-}
-```
-
-### Logging
-- Application logs to stdout/stderr
-- Structured logging with different levels
-- Error tracking for debugging
 
 ## Troubleshooting
 

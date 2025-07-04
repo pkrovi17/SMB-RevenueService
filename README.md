@@ -7,7 +7,8 @@ A Flask-based web application for analyzing financial data from small-to-medium 
 -  **Financial Data Analysis**: Upload CSV, Excel files or Google Sheets
 -  **AI-Powered Insights**: Uses LLaMA models for data extraction and dashboard generation
 -  **Interactive Charts**: Plotly-based visualizations for revenue, profit, and cost analysis
--  **Forecasting**: Prophet-based time series forecasting
+-  **Advanced Forecasting**: Prophet-based time series forecasting and SKU performance prediction
+-  **AI Chatbot**: Ask questions about your financial data and dashboard insights
 -  **Security**: CSRF protection, rate limiting, file validation
 -  **Production Ready**: Health checks, monitoring, and deployment guides
 
@@ -20,6 +21,34 @@ A Flask-based web application for analyzing financial data from small-to-medium 
 -  Input sanitization
 -  Session management with automatic cleanup
 -  Environment-based configuration
+
+## AI Chatbot
+
+The built-in AI-powered chatbot allows you to ask questions about your uploaded financial data, dashboard charts, and SKU performance. It provides:
+
+- Context-aware answers based on your data and generated insights
+- Explanations of trends, forecasts, and performance scores
+- Actionable business advice in a friendly, professional tone
+
+**How to use:**
+1. Upload your financial data (CSV, Excel, or Google Sheets)
+2. Go to the dashboard page
+3. Use the chatbot input box to ask questions like:
+   - "What are the main revenue trends this year?"
+   - "Which SKUs are underperforming and why?"
+   - "How can I improve my profit margin?"
+
+## Advanced Forecasting
+
+- **Time Series Forecasting**: Uses Prophet (if available) or a fallback trend analysis to forecast revenue and other metrics.
+- **SKU Performance Forecasting**: Each SKU is scored using a weighted formula (frequency, price, consistency) and forecasted over time, with visualizations for both performance score trends and transaction history.
+- **Automatic Fallback**: If Prophet is not installed, the app uses a simple trend line for forecasting.
+
+**SKU Performance Scoring System:**
+- 40% Frequency Score: Number of transactions (normalized)
+- 40% Price Score: Average transaction amount (normalized)
+- 20% Consistency Score: Price stability (lower volatility = higher score)
+- Scores are color-coded and SKUs are ranked for easy comparison.
 
 ## Prerequisites
 

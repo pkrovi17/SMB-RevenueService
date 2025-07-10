@@ -15,10 +15,30 @@ import threading
 import time
 import re
 from prompts import get_extraction_prompt, get_dashboard_prompt
+from werkzeug.serving import WSGIRequestHandler
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Robust suppression of only /performance GET logs
+class SuppressPerformanceHandler(logging.StreamHandler):
+    def emit(self, record):
+        msg = self.format(record)
+        if '"GET /performance ' in msg:
+            return
+        super().emit(record)
+
+werkzeug_logger = logging.getLogger('werkzeug')
+# Remove all handlers
+for handler in werkzeug_logger.handlers[:]:
+    werkzeug_logger.removeHandler(handler)
+# Add only our custom handler
+handler = SuppressPerformanceHandler()
+formatter = logging.Formatter('%(levelname)s:%(name)s:%(message)s')
+handler.setFormatter(formatter)
+werkzeug_logger.addHandler(handler)
+werkzeug_logger.propagate = False  # Prevent double logging
 
 app = Flask(__name__)
 # Use environment variable for secret key
@@ -1193,9 +1213,16 @@ def chat_with_data(session_id):
         logger.error(f"Error in chat_with_data: {e}")
         return jsonify({'error': 'An error occurred while processing your message'}), 500
 
+class SilentPerformanceRequestHandler(WSGIRequestHandler):
+    def log_request(self, code='-', size='-'):
+        # Only suppress GET /performance logs
+        if self.path == '/performance' and self.command == 'GET':
+            return
+        super().log_request(code, size)
+
 if __name__ == '__main__':
     # For AWS deployment, use:
     # app.run(host='0.0.0.0', port=5000, debug=False)
     # For local testing:
     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
-    app.run(host='0.0.0.0', port=5000, debug=debug_mode)
+    app.run(host='0.0.0.0', port=5000, debug=debug_mode, request_handler=SilentPerformanceRequestHandler)
